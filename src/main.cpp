@@ -4,6 +4,8 @@
 #include <commctrl.h>
 #include <mmsystem.h>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 namespace Gdiplus { using std::min; using std::max; }
 #include <gdiplus.h>
 
@@ -22,6 +24,8 @@ bool      g_paused = false;
 static HHOOK s_hook = nullptr;
 static UINT  s_taskbarCreated = 0;
 
+#define RS_TAG ((ULONG_PTR)0x52554544)
+
 #define TMR_HOLD 100
 #define TMR_DBL  101
 
@@ -29,6 +33,7 @@ static UINT  s_taskbarCreated = 0;
 #define ID_TRAY_SETTINGS 1002
 #define ID_TRAY_PAUSE    1003
 #define ID_TRAY_EXIT     1004
+#define ID_TRAY_LOG      1005
 
 // ------------------------------------------------------------------ sonidos (generados en memoria)
 static std::vector<BYTE> s_wavTick, s_wavOk;
@@ -80,6 +85,7 @@ void Media_Key(WORD vk) {
     in[0].type = INPUT_KEYBOARD;
     in[0].ki.wVk = vk;
     in[0].ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+    in[0].ki.dwExtraInfo = RS_TAG;
     in[1] = in[0];
     in[1].ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;
     SendInput(2, in, sizeof(INPUT));
@@ -103,32 +109,100 @@ void ToggleMuteWithOsd() {
     Osd_Show(Audio_GetMaster(), m);
 }
 
+// ------------------------------------------------------------------ registro de diagnóstico
+// Solo guarda teclas multimedia/volumen (nunca lo que escribes) en %APPDATA%\RuedaSuprema\registro.txt
+static int s_logLines = 0;
+
+static std::wstring LogPath() {
+    wchar_t buf[MAX_PATH] = {};
+    DWORD n = GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
+    std::wstring dir = (n > 0 && n < MAX_PATH) ? std::wstring(buf) : std::wstring(L".");
+    dir += L"\\RuedaSuprema";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\registro.txt";
+}
+
+static void Log(const wchar_t* fmt, ...) {
+    if (s_logLines > 300) return;
+    s_logLines++;
+    wchar_t line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    _vsnwprintf_s(line, 512, _TRUNCATE, fmt, ap);
+    va_end(ap);
+    SYSTEMTIME st; GetLocalTime(&st);
+    wchar_t full[600];
+    swprintf(full, 600, L"[%02d:%02d:%02d.%03d] %s\r\n", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, line);
+    char utf8[1400];
+    int len = WideCharToMultiByte(CP_UTF8, 0, full, -1, utf8, sizeof(utf8), nullptr, nullptr);
+    if (len <= 1) return;
+    HANDLE f = CreateFileW(LogPath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD wr = 0;
+    WriteFile(f, utf8, (DWORD)(len - 1), &wr, nullptr);
+    CloseHandle(f);
+}
+
+static bool InterestingVk(DWORD vk) {
+    return (vk >= 0xA6 && vk <= 0xB7) ||      // navegador, volumen y multimedia
+           (vk >= 0x7C && vk <= 0x87) ||      // F13-F24
+           vk == 0 || vk == 0xFF;
+}
+
 // ------------------------------------------------------------------ hook de teclado (la rueda)
 static LRESULT CALLBACK KeyboardHook(int code, WPARAM w, LPARAM l) {
-    if (code == HC_ACTION && !g_paused) {
+    if (code == HC_ACTION) {
         const KBDLLHOOKSTRUCT* k = (const KBDLLHOOKSTRUCT*)l;
-        if (!(k->flags & LLKHF_INJECTED)) {
-            bool down = (w == WM_KEYDOWN || w == WM_SYSKEYDOWN);
+        bool down = (w == WM_KEYDOWN || w == WM_SYSKEYDOWN);
+        DWORD vk = k->vkCode;
+        if (InterestingVk(vk))
+            Log(L"HOOK  vk=0x%02X scan=0x%02X flags=0x%02X %s%s", vk, k->scanCode, k->flags,
+                down ? L"pulsada" : L"soltada", g_paused ? L" (pausado)" : L"");
+        // Ya NO se ignoran las teclas marcadas como "inyectadas": el AK820 puede mandarlas así.
+        // Solo se ignoran las que manda este mismo programa.
+        if (!g_paused && k->dwExtraInfo != RS_TAG) {
             DWORD pressVk = g_cfg.pressKey == 1 ? VK_MEDIA_PLAY_PAUSE : VK_VOLUME_MUTE;
-            if (k->vkCode == VK_VOLUME_UP) {
+            if (vk == VK_VOLUME_UP) {
                 if (down) PostMessageW(g_hMain, WM_APP_KNOB, (WPARAM)1, 0);
                 return 1;
             }
-            if (k->vkCode == VK_VOLUME_DOWN) {
+            if (vk == VK_VOLUME_DOWN) {
                 if (down) PostMessageW(g_hMain, WM_APP_KNOB, (WPARAM)(INT_PTR)-1, 0);
                 return 1;
             }
-            if (k->vkCode == pressVk) {
+            if (vk == pressVk) {
                 PostMessageW(g_hMain, WM_APP_PRESS, down ? 1 : 0, 0);
                 return 1;
             }
-            if (k->vkCode == VK_ESCAPE && g_menuOpen) {
+            if (vk == VK_ESCAPE && g_menuOpen) {
                 if (down) PostMessageW(g_hMain, WM_APP_ESC, 0, 0);
                 return 1;
             }
         }
     }
     return CallNextHookEx(s_hook, code, w, l);
+}
+
+// Entrada "cruda" del control multimedia (solo para el registro de diagnóstico)
+static void OnRawInput(LPARAM l) {
+    UINT size = 0;
+    GetRawInputData((HRAWINPUT)l, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+    if (size == 0 || size > 1024) return;
+    alignas(8) BYTE buf[1024];
+    if (GetRawInputData((HRAWINPUT)l, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != size) return;
+    RAWINPUT* ri = (RAWINPUT*)buf;
+    if (ri->header.dwType != RIM_TYPEHID) return;
+    DWORD cnt = ri->data.hid.dwCount, sz = ri->data.hid.dwSizeHid;
+    for (DWORD i = 0; i < cnt && i < 4; i++) {
+        std::wstring hex;
+        for (DWORD b = 0; b < sz && b < 16; b++) {
+            wchar_t h[4];
+            swprintf(h, 4, L"%02X ", ri->data.hid.bRawData[i * sz + b]);
+            hex += h;
+        }
+        Log(L"RAW   control multimedia: %s", hex.c_str());
+    }
 }
 
 // ------------------------------------------------------------------ botón de la rueda
@@ -189,6 +263,7 @@ static void TrayMenu() {
     AppendMenuW(m, MF_STRING, ID_TRAY_OPEN, L"Abrir menú radial");
     AppendMenuW(m, MF_STRING, ID_TRAY_SETTINGS, L"Ajustes…");
     AppendMenuW(m, MF_STRING | (g_paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, L"Pausar (la rueda vuelve a ser normal)");
+    AppendMenuW(m, MF_STRING, ID_TRAY_LOG, L"Ver registro de diagnóstico");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | MF_GRAYED, 0, APP_CREDIT);
     AppendMenuW(m, MF_STRING, ID_TRAY_EXIT, L"Salir");
@@ -233,6 +308,9 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_APP_ESC:
         Radial_Close(true);
         return 0;
+    case WM_INPUT:
+        OnRawInput(l);
+        return DefWindowProcW(h, m, w, l);
     case WM_TIMER:
         if (w == TMR_HOLD) {
             KillTimer(h, TMR_HOLD);
@@ -256,6 +334,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_TRAY_SETTINGS: Settings_Show(); break;
         case ID_TRAY_PAUSE:    g_paused = !g_paused; if (g_paused) Radial_Close(false); break;
         case ID_TRAY_EXIT:     DestroyWindow(h); break;
+        case ID_TRAY_LOG:      ShellExecuteW(nullptr, L"open", LogPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
         }
         return 0;
     case WM_DESTROY:
@@ -314,6 +393,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
     s_hook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, hInst, 0);
     if (!s_hook)
         MessageBoxW(nullptr, L"No se pudo instalar el detector de la rueda.", APP_NAME, MB_ICONERROR);
+
+    RAWINPUTDEVICE rid = {};
+    rid.usUsagePage = 0x0C;   // Consumer Control (teclas multimedia y rueda)
+    rid.usUsage = 0x01;
+    rid.dwFlags = RIDEV_INPUTSINK;
+    rid.hwndTarget = g_hMain;
+    BOOL rawOk = RegisterRawInputDevices(&rid, 1, sizeof(rid));
+
+    Log(L"===== Rueda Suprema %s iniciada. Hook: %s. Entrada multimedia: %s. Tecla del botón: %s =====",
+        APP_VERSION, s_hook ? L"OK" : L"FALLO", rawOk ? L"OK" : L"FALLO",
+        g_cfg.pressKey == 1 ? L"Play/Pausa" : L"Mute");
 
     TrimMemory();
 

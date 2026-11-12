@@ -19,7 +19,7 @@
 
 #define APP_NAME    L"Rueda Suprema"
 #define APP_CREDIT  L"HECHO POR @BYALVARO__"
-#define APP_VERSION L"1.0"
+#define APP_VERSION L"1.1"
 
 #define MAIN_CLASS     L"RuedaSupremaMain"
 #define RADIAL_CLASS   L"RuedaSupremaRadial"
