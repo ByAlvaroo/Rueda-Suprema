@@ -34,6 +34,7 @@ static UINT  s_taskbarCreated = 0;
 #define ID_TRAY_PAUSE    1003
 #define ID_TRAY_EXIT     1004
 #define ID_TRAY_LOG      1005
+#define ID_TRAY_MIC      1006
 
 // ------------------------------------------------------------------ sonidos (generados en memoria)
 static std::vector<BYTE> s_wavTick, s_wavOk;
@@ -104,6 +105,13 @@ float StepVolume(float cur, int dir) {
 }
 
 void ToggleMuteWithOsd() {
+    if (g_cfg.muteTarget == 1) {        // silenciar el micrófono directamente
+        bool m = !Audio_GetMicMute();
+        Audio_SetMicMute(m);
+        Sound_Confirm();
+        Osd_Show(Audio_GetMic(), m, true);
+        return;
+    }
     bool m = !Audio_GetMute();
     Audio_SetMute(m);
     Osd_Show(Audio_GetMaster(), m);
@@ -262,6 +270,7 @@ static void TrayMenu() {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING, ID_TRAY_OPEN, L"Abrir menú radial");
     AppendMenuW(m, MF_STRING, ID_TRAY_SETTINGS, L"Ajustes…");
+    AppendMenuW(m, MF_STRING | (Audio_GetMicMute() ? MF_CHECKED : 0), ID_TRAY_MIC, L"Silenciar micrófono");
     AppendMenuW(m, MF_STRING | (g_paused ? MF_CHECKED : 0), ID_TRAY_PAUSE, L"Pausar (la rueda vuelve a ser normal)");
     AppendMenuW(m, MF_STRING, ID_TRAY_LOG, L"Ver registro de diagnóstico");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -334,6 +343,12 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_TRAY_SETTINGS: Settings_Show(); break;
         case ID_TRAY_PAUSE:    g_paused = !g_paused; if (g_paused) Radial_Close(false); break;
         case ID_TRAY_EXIT:     DestroyWindow(h); break;
+        case ID_TRAY_MIC: {
+            bool mm = !Audio_GetMicMute();
+            Audio_SetMicMute(mm);
+            Osd_Show(Audio_GetMic(), mm, true);
+            break;
+        }
         case ID_TRAY_LOG:      ShellExecuteW(nullptr, L"open", LogPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
         }
         return 0;

@@ -7,11 +7,14 @@
 namespace Gdiplus { using std::min; using std::max; }
 #include <gdiplus.h>
 #include <shellscalingapi.h>
+#include <shlobj.h>
+#include <memory>
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "shcore.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "shell32.lib")
 
 using namespace Gdiplus;
 
@@ -32,6 +35,7 @@ struct Entry {
     bool checked = false;
     bool slash = false;        // icono tachado (micro silenciado)
     std::wstring glyph, label, sub;
+    std::shared_ptr<Gdiplus::Bitmap> img;   // icono real de la app
 };
 
 #define TMR_ANIM      1
@@ -51,6 +55,7 @@ static std::vector<AudioDevice> s_devices;
 static int   s_sel = 0, s_rootSel = 0, s_acc = 0, s_sessionIdx = -1;
 static float s_value = 0;          // valor real (0..1) en modo ajuste
 static bool  s_adjMuted = false;
+static std::shared_ptr<Bitmap> s_adjImg;
 static std::wstring s_adjTitle, s_adjSub;
 static MediaInfo s_media;
 static DWORD s_lastSeekTick = 0;
@@ -68,7 +73,7 @@ static float s_scale = 1.f;
 static POINT s_center = { 0, 0 };
 
 // OSD
-static float s_osdVol = 0; static bool s_osdMute = false; static float s_osdAlpha = 0;
+static float s_osdVol = 0; static bool s_osdMute = false; static bool s_osdMic = false; static float s_osdAlpha = 0;
 static float s_osdScale = 1.f; static POINT s_osdPos = { 0, 0 }; static int s_osdW = 0, s_osdH = 0;
 
 // ------------------------------------------------------------------ utilidades
@@ -110,7 +115,7 @@ static void Present(HWND wnd, Surface& s, POINT dst, BYTE alpha) {
     ReleaseDC(nullptr, screen);
 }
 
-static const wchar_t* IconFont() {
+const wchar_t* Radial_IconFont() {
     static std::wstring name;
     if (name.empty()) {
         FontFamily f(L"Segoe Fluent Icons");
@@ -118,6 +123,8 @@ static const wchar_t* IconFont() {
     }
     return name.c_str();
 }
+
+static const wchar_t* IconFont() { return Radial_IconFont(); }
 
 static const wchar_t* TextFont() {
     static std::wstring name;
@@ -168,13 +175,6 @@ static std::wstring Initials(const std::wstring& name) {
     return r.empty() ? L"?" : r;
 }
 
-static bool LooksLikeHeadphones(const std::wstring& n) {
-    std::wstring l = n;
-    for (auto& c : l) c = (wchar_t)towlower(c);
-    const wchar_t* keys[] = { L"auric", L"headphone", L"headset", L"casco", L"buds", L"airpods", L"hands-free" };
-    for (auto k : keys) if (l.find(k) != std::wstring::npos) return true;
-    return false;
-}
 
 static const wchar_t* Glyph(int id) {
     switch (id) {
@@ -218,6 +218,62 @@ static std::wstring SubFor(int id) {
     return L"";
 }
 
+// Icono de un .exe convertido a imagen GDI+ con transparencia
+static std::shared_ptr<Bitmap> IconToBitmap(HICON hicon) {
+    std::shared_ptr<Bitmap> out;
+    ICONINFO ii = {};
+    if (!GetIconInfo(hicon, &ii)) return out;
+    BITMAP bm = {};
+    if (ii.hbmColor && GetObjectW(ii.hbmColor, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
+        int w = bm.bmWidth, h = bm.bmHeight;
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        std::vector<DWORD> px((size_t)w * h);
+        HDC dc = GetDC(nullptr);
+        int ok = GetDIBits(dc, ii.hbmColor, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+        bool hasAlpha = false;
+        for (DWORD p : px) if (p >> 24) { hasAlpha = true; break; }
+        if (ok && !hasAlpha && ii.hbmMask) {
+            std::vector<DWORD> mask((size_t)w * h);
+            GetDIBits(dc, ii.hbmMask, 0, h, mask.data(), &bi, DIB_RGB_COLORS);
+            for (size_t i = 0; i < px.size(); i++)
+                px[i] = (mask[i] & 0xFFFFFF) ? 0 : (px[i] | 0xFF000000);
+        }
+        ReleaseDC(nullptr, dc);
+        if (ok) {
+            out.reset(new Bitmap(w, h, PixelFormat32bppARGB));
+            BitmapData bd;
+            Rect r(0, 0, w, h);
+            if (out->LockBits(&r, ImageLockModeWrite, PixelFormat32bppARGB, &bd) == Ok) {
+                for (int y = 0; y < h; y++)
+                    memcpy((BYTE*)bd.Scan0 + (size_t)y * bd.Stride, &px[(size_t)y * w], (size_t)w * 4);
+                out->UnlockBits(&bd);
+            } else out.reset();
+        }
+    }
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    return out;
+}
+
+static std::shared_ptr<Bitmap> LoadAppIcon(const std::wstring& exe) {
+    if (exe.empty()) return nullptr;
+    HICON hi = nullptr;
+    if (FAILED(SHDefExtractIconW(exe.c_str(), 0, 0, &hi, nullptr, MAKELONG(64, 16))) || !hi) {
+        hi = nullptr;
+        ExtractIconExW(exe.c_str(), 0, &hi, nullptr, 1);
+    }
+    if (!hi) return nullptr;
+    auto bmp = IconToBitmap(hi);
+    DestroyIcon(hi);
+    return bmp;
+}
+
 static float Span() { return s_entries.empty() ? 360.f : 360.f / (float)s_entries.size(); }
 
 static void StartAnim() {
@@ -251,6 +307,10 @@ static void BuildRoot() {
         Entry e;
         e.id = id;
         e.glyph = Glyph(id);
+        if (id == IT_OUTPUT) {
+            for (auto& d : Audio_ListOutputs())
+                if (d.isDefault) { e.glyph = DeviceIcon_For(d.id, d.name); break; }
+        }
         if (id == IT_PLAYPAUSE && s_media.playing) e.glyph = L"";
         if (id == IT_MUTE && !Audio_GetMute()) e.glyph = L"";
         e.slash = (id == IT_MICMUTE) || (id == IT_MUTE && Audio_GetMute());
@@ -290,6 +350,10 @@ static void EnterMixer(int sel) {
         e.textIcon = true;
         e.glyph = s_sessions[i].system ? L"" : Initials(s_sessions[i].name);
         if (s_sessions[i].system) e.textIcon = false;
+        if (!s_sessions[i].system) {
+            e.img = LoadAppIcon(s_sessions[i].exePath);
+            if (e.img) e.textIcon = false;
+        }
         e.label = s_sessions[i].name;
         e.sub = s_sessions[i].mute ? L"Silenciada" : Pct(s_sessions[i].vol);
         v.push_back(e);
@@ -307,7 +371,7 @@ static void EnterOutputs() {
     for (size_t i = 0; i < s_devices.size(); i++) {
         Entry e;
         e.idx = (int)i;
-        e.glyph = LooksLikeHeadphones(s_devices[i].name) ? L"" : L"";
+        e.glyph = DeviceIcon_For(s_devices[i].id, s_devices[i].name);
         e.label = s_devices[i].name;
         e.checked = s_devices[i].isDefault;
         e.sub = s_devices[i].isDefault ? L"En uso ahora" : L"Pulsa para usar esta salida";
@@ -334,7 +398,7 @@ static void UpdateAdjustTexts() {
         s_adjMuted = false;
         if (s_sessionIdx >= 0 && s_sessionIdx < (int)s_sessions.size())
             s_adjTitle = s_sessions[s_sessionIdx].name;
-        s_adjSub = L"Pulsa para volver";
+        s_adjSub = s_adjImg ? s_adjTitle : L"Pulsa para volver";
         break;
     case A_SEEK:
         s_adjMuted = false;
@@ -350,7 +414,11 @@ static void EnterAdjust(Adj a) {
     switch (a) {
     case A_MASTER:  s_value = Audio_GetMaster(); break;
     case A_MIC:     s_value = Audio_GetMic(); break;
-    case A_SESSION: s_value = (s_sessionIdx >= 0 && s_sessionIdx < (int)s_sessions.size()) ? s_sessions[s_sessionIdx].vol : 0; break;
+    case A_SESSION:
+        s_value = (s_sessionIdx >= 0 && s_sessionIdx < (int)s_sessions.size()) ? s_sessions[s_sessionIdx].vol : 0;
+        s_adjImg.reset();
+        for (auto& en : s_entries) if (en.idx == s_sessionIdx && !en.back) { s_adjImg = en.img; break; }
+        break;
     case A_SEEK:
         s_media = Media_Get(true);
         s_value = s_media.dur > 0 ? (float)(s_media.pos / s_media.dur) : 0.f;
@@ -378,6 +446,12 @@ static void AnnularSector(GraphicsPath& p, float R, float r, float start, float 
 
 static void DrawItemIcon(Graphics& g, const Entry& e, float cx, float cy, float size, const Color& c) {
     RectF rc(cx - size, cy - size, size * 2, size * 2);
+    if (e.img) {
+        float is = size * 0.82f;
+        g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+        g.DrawImage(e.img.get(), RectF(cx - is, cy - is, is * 2, is * 2));
+        return;
+    }
     if (e.textIcon) Txt(g, e.glyph, TextFont(), size * 0.72f, FontStyleBold, c, rc);
     else            Txt(g, e.glyph, IconFont(), size, FontStyleRegular, c, rc);
     if (e.slash) {
@@ -490,7 +564,12 @@ static void DrawCenter(Graphics& g, float r) {
         std::wstring big;
         if (s_adj == A_SEEK) big = Clock(s_media.pos);
         else big = s_adjMuted ? L"" : Pct(s_value);
-        Txt(g, s_adjTitle, TextFont(), cr * 0.15f, FontStyleBold, dim, RectF(-w / 2, -cr * 0.62f, w, cr * 0.26f));
+        if (s_adj == A_SESSION && s_adjImg) {
+            float is = cr * 0.13f;
+            g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+            g.DrawImage(s_adjImg.get(), RectF(-is, -cr * 0.49f - is, is * 2, is * 2));
+        } else
+            Txt(g, s_adjTitle, TextFont(), cr * 0.15f, FontStyleBold, dim, RectF(-w / 2, -cr * 0.62f, w, cr * 0.26f));
         if (s_adjMuted && s_adj != A_SEEK)
             Txt(g, big, IconFont(), cr * 0.40f, FontStyleRegular, Color(255, 235, 110, 110), RectF(-w / 2, -cr * 0.36f, w, cr * 0.62f));
         else
@@ -559,6 +638,7 @@ static void FinishClose() {
     g_menuOpen = false;
     FreeSurface(s_surf);
     std::vector<Entry>().swap(s_entries);
+    s_adjImg.reset();
     std::vector<AppSession>().swap(s_sessions);
     std::vector<AudioDevice>().swap(s_devices);
     TrimMemory();
@@ -638,7 +718,7 @@ void Radial_Rotate(int dir) {
                 AppSession& a = s_sessions[s_sessionIdx];
                 a.vol = StepVolume(a.vol, dir);
                 if (a.vol > 0) a.mute = false;
-                Audio_SetSessionVolume(a.pid, a.system, a.vol);
+                Audio_SetSessionVolume(a.id, a.vol);
                 s_value = a.vol;
             }
             break;
@@ -860,9 +940,16 @@ static void RenderOsd() {
         Pen rim(Color(45, 255, 255, 255), 1.f * S);
         g.DrawPath(&rim, &p);
 
-        const wchar_t* icon = s_osdMute ? L"" : (s_osdVol <= 0.001f ? L"" : (s_osdVol < 0.34f ? L"" : (s_osdVol < 0.67f ? L"" : L"")));
+        const wchar_t* icon = s_osdMute ? L"\uE74F" : (s_osdVol <= 0.001f ? L"\uE992" : (s_osdVol < 0.34f ? L"\uE993" : (s_osdVol < 0.67f ? L"\uE994" : L"\uE995")));
+        if (s_osdMic) icon = L"\uE720";
         Color ic = s_osdMute ? Color(255, 235, 110, 110) : Color(255, 255, 255, 255);
         Txt(g, icon, IconFont(), h * 0.42f, FontStyleRegular, ic, RectF(m + h * 0.18f, m, h * 0.8f, h));
+        if (s_osdMic && s_osdMute) {
+            float cx = m + h * 0.58f, cy = m + h / 2, a = h * 0.2f;
+            Pen sl(ic, 2.2f * S);
+            sl.SetStartCap(LineCapRound); sl.SetEndCap(LineCapRound);
+            g.DrawLine(&sl, cx - a, cy - a, cx + a, cy + a);
+        }
 
         float bx = m + h * 1.05f, bw = w - h * 1.05f - h * 1.25f, bh = 5 * S, by = m + h / 2 - bh / 2;
         GraphicsPath tp; RRect(tp, bx, by, bw, bh, bh / 2);
@@ -882,9 +969,9 @@ static void RenderOsd() {
     Present(s_osd, s_osdSurf, s_osdPos, (BYTE)(255 * std::max(0.f, std::min(1.f, s_osdAlpha))));
 }
 
-void Osd_Show(float vol, bool mute) {
+void Osd_Show(float vol, bool mute, bool mic) {
     if (!g_cfg.osd || Radial_IsOpen()) return;
-    s_osdVol = vol; s_osdMute = mute;
+    s_osdVol = vol; s_osdMute = mute; s_osdMic = mic;
     POINT pt; GetCursorPos(&pt);
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = { sizeof(mi) };

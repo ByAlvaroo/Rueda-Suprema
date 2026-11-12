@@ -117,7 +117,7 @@ static std::wstring FileDescription(const std::wstring& path) {
     return L"";
 }
 
-static std::wstring ProcessName(DWORD pid) {
+static std::wstring ProcessName(DWORD pid, std::wstring* exePath) {
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!h) return L"";
     wchar_t buf[MAX_PATH] = {};
@@ -125,6 +125,7 @@ static std::wstring ProcessName(DWORD pid) {
     std::wstring result;
     if (QueryFullProcessImageNameW(h, 0, buf, &sz)) {
         std::wstring path(buf);
+        if (exePath) *exePath = path;
         result = FileDescription(path);
         if (result.empty() || result.size() > 28) {
             size_t s = path.find_last_of(L"\\/");
@@ -166,11 +167,21 @@ static void ForEachSession(F fn) {
     }
 }
 
+static std::wstring SessionId(IAudioSessionControl2* c2) {
+    std::wstring id;
+    LPWSTR p = nullptr;
+    if (SUCCEEDED(c2->GetSessionInstanceIdentifier(&p)) && p) { id = p; CoTaskMemFree(p); }
+    return id;
+}
+
+// Cada sesión de audio por separado (dos ventanas/instancias de una app = dos entradas,
+// siempre que Windows las tenga como sesiones distintas)
 std::vector<AppSession> Audio_ListSessions() {
     std::vector<AppSession> out;
     ForEachSession([&](IAudioSessionControl2* c2, ISimpleAudioVolume* sv, DWORD pid, bool sys) {
-        for (auto& s : out) if (s.pid == pid && s.system == sys) return;   // misma app, varias sesiones
         AppSession a;
+        a.id = SessionId(c2);
+        for (auto& s : out) if (!a.id.empty() && s.id == a.id) return;
         a.pid = pid;
         a.system = sys;
         float v = 1; BOOL m = FALSE;
@@ -179,11 +190,13 @@ std::vector<AppSession> Audio_ListSessions() {
         a.vol = v; a.mute = m != FALSE;
         if (sys) a.name = L"Sonidos del sistema";
         else {
-            a.name = ProcessName(pid);
-            if (a.name.empty()) {
-                LPWSTR dn = nullptr;
-                if (SUCCEEDED(c2->GetDisplayName(&dn)) && dn) { a.name = dn; CoTaskMemFree(dn); }
-            }
+            a.name = ProcessName(pid, &a.exePath);
+            LPWSTR dn = nullptr;
+            std::wstring display;
+            if (SUCCEEDED(c2->GetDisplayName(&dn)) && dn) { display = dn; CoTaskMemFree(dn); }
+            if (!display.empty() && display[0] == L'@') display.clear();   // recurso interno, no es un nombre
+            if (a.name.empty()) a.name = display;
+            else if (!display.empty() && _wcsicmp(display.c_str(), a.name.c_str()) != 0) a.name += L" · " + display;
             if (a.name.empty()) a.name = L"App " + std::to_wstring(pid);
         }
         out.push_back(a);
@@ -193,13 +206,19 @@ std::vector<AppSession> Audio_ListSessions() {
         if (a.system != b.system) return !a.system;
         return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
     });
+    // Nombres repetidos: "Vivaldi", "Vivaldi 2", "Vivaldi 3"...
+    for (size_t i = 0; i < out.size(); i++) {
+        int n = 1;
+        for (size_t j = i + 1; j < out.size(); j++)
+            if (out[j].name == out[i].name) out[j].name += L" " + std::to_wstring(++n);
+    }
     return out;
 }
 
-void Audio_SetSessionVolume(DWORD pid, bool system, float v) {
+void Audio_SetSessionVolume(const std::wstring& sessionId, float v) {
     v = Clamp01(v);
-    ForEachSession([&](IAudioSessionControl2*, ISimpleAudioVolume* sv, DWORD p, bool sys) {
-        if (p == pid && sys == system) {
+    ForEachSession([&](IAudioSessionControl2* c2, ISimpleAudioVolume* sv, DWORD, bool) {
+        if (SessionId(c2) == sessionId) {
             sv->SetMasterVolume(v, nullptr);
             if (v > 0) sv->SetMute(FALSE, nullptr);
         }

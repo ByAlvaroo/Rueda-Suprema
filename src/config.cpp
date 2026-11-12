@@ -2,6 +2,7 @@
 #include "common.h"
 #include <cstdio>
 #include <cwchar>
+#include <cwctype>
 
 Config g_cfg;
 
@@ -36,7 +37,6 @@ void Config_Defaults(Config& c) {
     const int def[IT_COUNT] = { IT_VOLUME, IT_MIXER, IT_OUTPUT, IT_MIC, IT_MUTE,
                                 IT_PLAYPAUSE, IT_NEXT, IT_PREV, IT_SEEK, IT_MICMUTE, IT_SETTINGS };
     for (int i = 0; i < IT_COUNT; i++) { c.order[i] = def[i]; c.enabled[i] = true; }
-    c.enabled[IT_MICMUTE] = false;
 }
 
 static int ReadInt(const std::wstring& ini, const wchar_t* key, int def, int lo, int hi) {
@@ -73,6 +73,7 @@ void Config_Load() {
     g_cfg.invert           = ReadInt(ini, L"Invert", g_cfg.invert, 0, 1) != 0;
     g_cfg.pressMode        = ReadInt(ini, L"PressMode", g_cfg.pressMode, 0, 2);
     g_cfg.pressKey         = ReadInt(ini, L"PressKey", g_cfg.pressKey, 0, 1);
+    g_cfg.muteTarget       = ReadInt(ini, L"MuteTarget", g_cfg.muteTarget, 0, 1);
     g_cfg.holdMs           = ReadInt(ini, L"HoldMs", g_cfg.holdMs, 250, 1000);
     g_cfg.size             = ReadInt(ini, L"Size", g_cfg.size, 260, 560);
     g_cfg.opacity          = ReadInt(ini, L"Opacity", g_cfg.opacity, 120, 255);
@@ -96,11 +97,21 @@ void Config_Load() {
         for (int i = 0; i < IT_COUNT; i++) { g_cfg.enabled[i] = en[i] != 0; any |= g_cfg.enabled[i]; }
         if (!any) g_cfg.enabled[IT_VOLUME] = true;
     }
+    // v1.2: "Silenciar micro" pasa a estar activado en el menú
+    if (ReadInt(ini, L"ConfigVersion", 1, 1, 99) < 2) {
+        g_cfg.enabled[IT_MICMUTE] = true;
+        Config_Save();
+    }
 }
 
 static void WriteInt(const std::wstring& ini, const wchar_t* key, int v) {
     wchar_t b[32]; swprintf(b, 32, L"%d", v);
     WritePrivateProfileStringW(L"RuedaSuprema", key, b, ini.c_str());
+}
+
+static void WriteInt2(const std::wstring& ini, const wchar_t* key, int v) {
+    wchar_t b[32]; swprintf(b, 32, L"%d", v);
+    WritePrivateProfileStringW(L"IconosSalida", key, b, ini.c_str());
 }
 
 void Config_Save() {
@@ -110,6 +121,8 @@ void Config_Save() {
     WriteInt(ini, L"Invert", g_cfg.invert);
     WriteInt(ini, L"PressMode", g_cfg.pressMode);
     WriteInt(ini, L"PressKey", g_cfg.pressKey);
+    WriteInt(ini, L"MuteTarget", g_cfg.muteTarget);
+    WriteInt(ini, L"ConfigVersion", 2);
     WriteInt(ini, L"HoldMs", g_cfg.holdMs);
     WriteInt(ini, L"Size", g_cfg.size);
     WriteInt(ini, L"Opacity", g_cfg.opacity);
@@ -143,4 +156,48 @@ void Startup_Apply(bool on) {
         RegDeleteValueW(key, L"RuedaSuprema");
     }
     RegCloseKey(key);
+}
+
+// ---------------------------------------------------------------- iconos de dispositivos de salida
+struct DevIcon { const wchar_t* name; const wchar_t* glyph; };
+static const DevIcon kDevIcons[] = {
+    { L"Altavoces",            L"\uE7F5" },
+    { L"Cascos",               L"\uE7F6" },
+    { L"Cascos con micro",     L"\uE95B" },
+    { L"Monitor / TV",         L"\uE7F4" },
+    { L"Portátil",             L"\uE7F8" },
+    { L"Bluetooth",            L"\uE702" },
+    { L"Música",               L"\uE8D6" },
+    { L"Gaming",               L"\uE7FC" },
+    { L"Volumen",              L"\uE767" },
+};
+
+int DeviceIcon_Count() { return (int)(sizeof(kDevIcons) / sizeof(kDevIcons[0])); }
+const wchar_t* DeviceIcon_Name(int idx)  { return (idx >= 0 && idx < DeviceIcon_Count()) ? kDevIcons[idx].name : L"Automático"; }
+const wchar_t* DeviceIcon_Glyph(int idx) { return (idx >= 0 && idx < DeviceIcon_Count()) ? kDevIcons[idx].glyph : kDevIcons[0].glyph; }
+
+int DeviceIcon_Get(const std::wstring& deviceId) {
+    if (deviceId.empty()) return -1;
+    int v = (int)GetPrivateProfileIntW(L"IconosSalida", deviceId.c_str(), -1, IniPath().c_str());
+    return (v >= 0 && v < DeviceIcon_Count()) ? v : -1;
+}
+
+void DeviceIcon_Set(const std::wstring& deviceId, int idx) {
+    if (deviceId.empty()) return;
+    std::wstring ini = IniPath();
+    if (idx < 0) WritePrivateProfileStringW(L"IconosSalida", deviceId.c_str(), nullptr, ini.c_str());
+    else WriteInt2(ini, deviceId.c_str(), idx);
+}
+
+const wchar_t* DeviceIcon_For(const std::wstring& deviceId, const std::wstring& name) {
+    int idx = DeviceIcon_Get(deviceId);
+    if (idx >= 0) return kDevIcons[idx].glyph;
+    std::wstring l = name;
+    for (auto& c : l) c = (wchar_t)towlower(c);
+    const wchar_t* phones[] = { L"auric", L"headphone", L"headset", L"casco", L"buds", L"airpods", L"hands-free" };
+    for (auto k : phones) if (l.find(k) != std::wstring::npos) return kDevIcons[1].glyph;
+    if (l.find(L"hdmi") != std::wstring::npos || l.find(L"display") != std::wstring::npos ||
+        l.find(L"monitor") != std::wstring::npos || l.find(L"nvidia") != std::wstring::npos)
+        return kDevIcons[3].glyph;
+    return kDevIcons[0].glyph;
 }

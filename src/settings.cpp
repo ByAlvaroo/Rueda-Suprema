@@ -20,7 +20,9 @@ enum {
     RS_COLOR, RS_SWATCH,
     RS_CLOSEACTION,
     RS_OSD, RS_SOUNDS, RS_STARTUP,
-    RS_TEST, RS_CLOSE, RS_CREDIT
+    RS_TEST, RS_CLOSE, RS_CREDIT,
+    RS_MUTETARGET,
+    RS_DEVLIST, RS_DEVICON, RS_DEVPREVIEW
 };
 
 static HWND   s_wnd = nullptr;
@@ -28,6 +30,8 @@ static HFONT  s_font = nullptr, s_fontTitle = nullptr, s_fontBold = nullptr;
 static HBRUSH s_swatch = nullptr;
 static UINT   s_dpi = 96;
 static bool   s_populating = false;
+static HFONT  s_fontIcon = nullptr;
+static std::vector<AudioDevice> s_devs;
 
 static int S(int v) { return MulDiv(v, (int)s_dpi, 96); }
 
@@ -90,76 +94,128 @@ static void MoveItem(int delta) {
     Config_Save();
 }
 
+static int SelectedDevice() {
+    return ListView_GetNextItem(GetDlgItem(s_wnd, RS_DEVLIST), -1, LVNI_SELECTED);
+}
+
+static void UpdateDevicePanel() {
+    int d = SelectedDevice();
+    HWND cb = GetDlgItem(s_wnd, RS_DEVICON);
+    EnableWindow(cb, d >= 0);
+    if (d < 0 || d >= (int)s_devs.size()) { SetDlgItemTextW(s_wnd, RS_DEVPREVIEW, L""); return; }
+    int idx = DeviceIcon_Get(s_devs[d].id);
+    SendMessageW(cb, CB_SETCURSEL, idx + 1, 0);    // 0 = Automático
+    SetDlgItemTextW(s_wnd, RS_DEVPREVIEW, DeviceIcon_For(s_devs[d].id, s_devs[d].name));
+}
+
+static void FillDevices() {
+    s_devs = Audio_ListOutputs();
+    HWND lv = GetDlgItem(s_wnd, RS_DEVLIST);
+    ListView_DeleteAllItems(lv);
+    int sel = 0;
+    for (size_t i = 0; i < s_devs.size(); i++) {
+        std::wstring t = s_devs[i].name + (s_devs[i].isDefault ? L"  (en uso)" : L"");
+        LVITEMW it = {};
+        it.mask = LVIF_TEXT;
+        it.iItem = (int)i;
+        it.pszText = (LPWSTR)t.c_str();
+        ListView_InsertItem(lv, &it);
+        if (s_devs[i].isDefault) sel = (int)i;
+    }
+    if (!s_devs.empty())
+        ListView_SetItemState(lv, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    UpdateDevicePanel();
+}
+
+static void Check(HWND h, bool on) { SendMessageW(h, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0); }
+
 static void Build() {
     // cabecera
     HWND t = Ctl(L"STATIC", L"Rueda Suprema", SS_LEFT, 20, 12, 400, 32, 0);
     SendMessageW(t, WM_SETFONT, (WPARAM)s_fontTitle, TRUE);
     Ctl(L"STATIC", L"Menú radial para la rueda de volumen del AJAZZ AK820", SS_LEFT, 22, 46, 520, 20, 0);
 
+    // ================= columna izquierda =================
     // ---- Rueda
-    Ctl(L"BUTTON", L"Rueda", BS_GROUPBOX, 12, 74, 576, 214, 0);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 100, 240, 20, RS_VOLSTEP_L);
-    Track(RS_VOLSTEP, 280, 96, 290, 1, 10, g_cfg.volStep, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 132, 240, 20, RS_CLICKS_L);
-    Track(RS_CLICKS, 280, 128, 290, 1, 5, g_cfg.menuClicks, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 164, 240, 20, RS_HOLD_L);
-    Track(RS_HOLD, 280, 160, 290, 5, 20, g_cfg.holdMs / 50, 1);
+    Ctl(L"BUTTON", L"Rueda", BS_GROUPBOX, 12, 74, 440, 264, 0);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 100, 200, 20, RS_VOLSTEP_L);
+    Track(RS_VOLSTEP, 230, 96, 210, 1, 10, g_cfg.volStep, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 132, 200, 20, RS_CLICKS_L);
+    Track(RS_CLICKS, 230, 128, 210, 1, 5, g_cfg.menuClicks, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 164, 200, 20, RS_HOLD_L);
+    Track(RS_HOLD, 230, 160, 210, 5, 20, g_cfg.holdMs / 50, 1);
 
-    Ctl(L"STATIC", L"Botón de la rueda:", SS_LEFT, 28, 199, 170, 20, 0);
-    HWND cb = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 195, 370, 200, RS_PRESSMODE);
-    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Clic: abrir/confirmar  ·  Mantener: silenciar");
-    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Doble clic: abrir menú  ·  Clic: silenciar");
-    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Mantener: abrir menú  ·  Clic: silenciar");
+    Ctl(L"STATIC", L"Botón de la rueda:", SS_LEFT, 28, 200, 150, 20, 0);
+    HWND cb = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 180, 196, 260, 200, RS_PRESSMODE);
+    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Clic: menú · Mantener: silenciar");
+    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Doble clic: menú · Clic: silenciar");
+    SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Mantener: menú · Clic: silenciar");
     SendMessageW(cb, CB_SETCURSEL, g_cfg.pressMode, 0);
 
-    Ctl(L"STATIC", L"Al pulsar, la rueda envía:", SS_LEFT, 28, 231, 170, 20, 0);
-    HWND ck = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 227, 370, 200, RS_PRESSKEY);
-    SendMessageW(ck, CB_ADDSTRING, 0, (LPARAM)L"Silenciar (Mute) - lo normal en el AK820");
+    Ctl(L"STATIC", L"Silenciar con la rueda:", SS_LEFT, 28, 232, 150, 20, 0);
+    HWND mt = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 180, 228, 260, 200, RS_MUTETARGET);
+    SendMessageW(mt, CB_ADDSTRING, 0, (LPARAM)L"El sonido");
+    SendMessageW(mt, CB_ADDSTRING, 0, (LPARAM)L"El micrófono (directo)");
+    SendMessageW(mt, CB_SETCURSEL, g_cfg.muteTarget, 0);
+
+    Ctl(L"STATIC", L"Al pulsar, la rueda envía:", SS_LEFT, 28, 264, 150, 20, 0);
+    HWND ck = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 180, 260, 260, 200, RS_PRESSKEY);
+    SendMessageW(ck, CB_ADDSTRING, 0, (LPARAM)L"Silenciar (Mute) - normal en el AK820");
     SendMessageW(ck, CB_ADDSTRING, 0, (LPARAM)L"Play / Pausa");
     SendMessageW(ck, CB_SETCURSEL, g_cfg.pressKey, 0);
 
-    HWND inv = Ctl(L"BUTTON", L"Invertir sentido de giro", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 260, 300, 22, RS_INVERT);
-    SendMessageW(inv, BM_SETCHECK, g_cfg.invert ? BST_CHECKED : BST_UNCHECKED, 0);
+    Check(Ctl(L"BUTTON", L"Invertir sentido de giro", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 302, 300, 22, RS_INVERT), g_cfg.invert);
 
-    // ---- Menú radial
-    Ctl(L"BUTTON", L"Menú radial", BS_GROUPBOX, 12, 298, 576, 268, 0);
-    Ctl(L"STATIC", L"Opciones (marca las que quieres y ordénalas):", SS_LEFT, 28, 320, 340, 20, 0);
+    // ---- Aspecto y general
+    Ctl(L"BUTTON", L"Aspecto y general", BS_GROUPBOX, 12, 348, 440, 232, 0);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 374, 200, 20, RS_SIZE_L);
+    Track(RS_SIZE, 230, 370, 210, 13, 28, g_cfg.size / 20, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 406, 200, 20, RS_OPACITY_L);
+    Track(RS_OPACITY, 230, 402, 210, 120, 255, g_cfg.opacity, 10);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 438, 200, 20, RS_AUTOCLOSE_L);
+    Track(RS_AUTOCLOSE, 230, 434, 210, 2, 20, g_cfg.autoClose, 1);
+    Ctl(L"BUTTON", L"Color de acento…", BS_PUSHBUTTON | WS_TABSTOP, 28, 468, 150, 30, RS_COLOR);
+    Ctl(L"STATIC", L"", SS_NOTIFY | WS_BORDER, 186, 468, 44, 30, RS_SWATCH);
+    Check(Ctl(L"BUTTON", L"OSD de volumen propio", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 512, 200, 22, RS_OSD), g_cfg.osd);
+    Check(Ctl(L"BUTTON", L"Sonidos al girar", BS_AUTOCHECKBOX | WS_TABSTOP, 240, 512, 200, 22, RS_SOUNDS), g_cfg.sounds);
+    Check(Ctl(L"BUTTON", L"Iniciar con Windows", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 542, 200, 22, RS_STARTUP), g_cfg.startup);
+    Check(Ctl(L"BUTTON", L"Cerrar menú tras Play/Sig./Ant.", BS_AUTOCHECKBOX | WS_TABSTOP, 240, 542, 205, 22, RS_CLOSEACTION), g_cfg.closeAfterAction);
+
+    // ================= columna derecha =================
+    // ---- Opciones del menú
+    Ctl(L"BUTTON", L"Opciones del menú radial", BS_GROUPBOX, 464, 74, 444, 264, 0);
+    Ctl(L"STATIC", L"Marca las que quieres y ordénalas:", SS_LEFT, 480, 96, 340, 20, 0);
     HWND lv = Ctl(WC_LISTVIEWW, L"", LVS_REPORT | LVS_NOCOLUMNHEADER | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
-                  28, 342, 240, 186, RS_LIST);
+                  480, 118, 300, 206, RS_LIST);
     ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     LVCOLUMNW col = {};
     col.mask = LVCF_WIDTH;
-    col.cx = S(214);
+    col.cx = S(274);
     ListView_InsertColumn(lv, 0, &col);
     FillList(0);
-    Ctl(L"BUTTON", L"▲ Subir", BS_PUSHBUTTON | WS_TABSTOP, 276, 342, 90, 28, RS_UP);
-    Ctl(L"BUTTON", L"▼ Bajar", BS_PUSHBUTTON | WS_TABSTOP, 276, 376, 90, 28, RS_DOWN);
+    Ctl(L"BUTTON", L"▲ Subir", BS_PUSHBUTTON | WS_TABSTOP, 790, 118, 104, 30, RS_UP);
+    Ctl(L"BUTTON", L"▼ Bajar", BS_PUSHBUTTON | WS_TABSTOP, 790, 154, 104, 30, RS_DOWN);
 
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 322, 196, 20, RS_SIZE_L);
-    Track(RS_SIZE, 380, 342, 200, 13, 28, g_cfg.size / 20, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 376, 196, 20, RS_OPACITY_L);
-    Track(RS_OPACITY, 380, 396, 200, 120, 255, g_cfg.opacity, 10);
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 430, 196, 20, RS_AUTOCLOSE_L);
-    Track(RS_AUTOCLOSE, 380, 450, 200, 2, 20, g_cfg.autoClose, 1);
-    Ctl(L"BUTTON", L"Color de acento…", BS_PUSHBUTTON | WS_TABSTOP, 384, 490, 140, 30, RS_COLOR);
-    Ctl(L"STATIC", L"", SS_NOTIFY | WS_BORDER, 532, 490, 44, 30, RS_SWATCH);
-
-    HWND ca = Ctl(L"BUTTON", L"Cerrar el menú tras Play / Siguiente / Anterior", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 536, 400, 22, RS_CLOSEACTION);
-    SendMessageW(ca, BM_SETCHECK, g_cfg.closeAfterAction ? BST_CHECKED : BST_UNCHECKED, 0);
-
-    // ---- General
-    Ctl(L"BUTTON", L"General", BS_GROUPBOX, 12, 576, 576, 58, 0);
-    HWND o = Ctl(L"BUTTON", L"OSD de volumen propio", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 600, 180, 22, RS_OSD);
-    SendMessageW(o, BM_SETCHECK, g_cfg.osd ? BST_CHECKED : BST_UNCHECKED, 0);
-    HWND sn = Ctl(L"BUTTON", L"Sonidos al girar", BS_AUTOCHECKBOX | WS_TABSTOP, 220, 600, 150, 22, RS_SOUNDS);
-    SendMessageW(sn, BM_SETCHECK, g_cfg.sounds ? BST_CHECKED : BST_UNCHECKED, 0);
-    HWND st = Ctl(L"BUTTON", L"Iniciar con Windows", BS_AUTOCHECKBOX | WS_TABSTOP, 390, 600, 180, 22, RS_STARTUP);
-    SendMessageW(st, BM_SETCHECK, g_cfg.startup ? BST_CHECKED : BST_UNCHECKED, 0);
+    // ---- Iconos de las salidas de audio
+    Ctl(L"BUTTON", L"Icono de cada salida de audio", BS_GROUPBOX, 464, 348, 444, 232, 0);
+    Ctl(L"STATIC", L"Elige una salida y el icono con el que la reconocerás:", SS_LEFT, 480, 370, 410, 20, 0);
+    HWND dl = Ctl(WC_LISTVIEWW, L"", LVS_REPORT | LVS_NOCOLUMNHEADER | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
+                  480, 392, 412, 128, RS_DEVLIST);
+    ListView_SetExtendedListViewStyle(dl, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    LVCOLUMNW dc = {};
+    dc.mask = LVCF_WIDTH;
+    dc.cx = S(386);
+    ListView_InsertColumn(dl, 0, &dc);
+    Ctl(L"STATIC", L"Icono:", SS_LEFT, 480, 538, 50, 20, 0);
+    HWND di = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 530, 534, 230, 300, RS_DEVICON);
+    SendMessageW(di, CB_ADDSTRING, 0, (LPARAM)L"Automático");
+    for (int i = 0; i < DeviceIcon_Count(); i++) SendMessageW(di, CB_ADDSTRING, 0, (LPARAM)DeviceIcon_Name(i));
+    Ctl(L"STATIC", L"", SS_CENTER | SS_CENTERIMAGE, 780, 522, 56, 50, RS_DEVPREVIEW);
 
     // ---- Pie
-    Ctl(L"BUTTON", L"Probar menú", BS_PUSHBUTTON | WS_TABSTOP, 12, 648, 120, 32, RS_TEST);
-    HWND cr = Ctl(L"STATIC", APP_CREDIT, SS_CENTER | SS_CENTERIMAGE, 150, 648, 300, 32, RS_CREDIT);
-    Ctl(L"BUTTON", L"Cerrar", BS_DEFPUSHBUTTON | WS_TABSTOP, 488, 648, 100, 32, RS_CLOSE);
+    Ctl(L"BUTTON", L"Probar menú", BS_PUSHBUTTON | WS_TABSTOP, 12, 594, 130, 32, RS_TEST);
+    HWND cr = Ctl(L"STATIC", APP_CREDIT, SS_CENTER | SS_CENTERIMAGE, 310, 594, 300, 32, RS_CREDIT);
+    Ctl(L"BUTTON", L"Cerrar", BS_DEFPUSHBUTTON | WS_TABSTOP, 808, 594, 100, 32, RS_CLOSE);
 
     EnumChildWindows(s_wnd, [](HWND c, LPARAM) -> BOOL {
         if ((HFONT)SendMessageW(c, WM_GETFONT, 0, 0) == nullptr) SendMessageW(c, WM_SETFONT, (WPARAM)s_font, TRUE);
@@ -167,7 +223,9 @@ static void Build() {
     }, 0);
     SendMessageW(t, WM_SETFONT, (WPARAM)s_fontTitle, TRUE);
     SendMessageW(cr, WM_SETFONT, (WPARAM)s_fontBold, TRUE);
+    SendDlgItemMessageW(s_wnd, RS_DEVPREVIEW, WM_SETFONT, (WPARAM)s_fontIcon, TRUE);
     UpdateLabels();
+    FillDevices();
 }
 
 static bool Checked(int id) { return IsDlgButtonChecked(s_wnd, id) == BST_CHECKED; }
@@ -194,6 +252,19 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         switch (id) {
         case RS_PRESSMODE:
             if (HIWORD(w) == CBN_SELCHANGE) { g_cfg.pressMode = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0); Config_Save(); }
+            break;
+        case RS_MUTETARGET:
+            if (HIWORD(w) == CBN_SELCHANGE) { g_cfg.muteTarget = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0); Config_Save(); }
+            break;
+        case RS_DEVICON:
+            if (HIWORD(w) == CBN_SELCHANGE) {
+                int d = SelectedDevice();
+                if (d >= 0 && d < (int)s_devs.size()) {
+                    int sel = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0);
+                    DeviceIcon_Set(s_devs[d].id, sel - 1);
+                    UpdateDevicePanel();
+                }
+            }
             break;
         case RS_PRESSKEY:
             if (HIWORD(w) == CBN_SELCHANGE) { g_cfg.pressKey = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0); Config_Save(); }
@@ -237,6 +308,11 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_NOTIFY: {
         NMHDR* hdr = (NMHDR*)l;
+        if (hdr->idFrom == RS_DEVLIST && hdr->code == LVN_ITEMCHANGED) {
+            NMLISTVIEW* nm = (NMLISTVIEW*)l;
+            if ((nm->uChanged & LVIF_STATE) && ((nm->uNewState ^ nm->uOldState) & LVIS_SELECTED)) UpdateDevicePanel();
+            return 0;
+        }
         if (hdr->idFrom == RS_LIST && hdr->code == LVN_ITEMCHANGED && !s_populating) {
             NMLISTVIEW* nm = (NMLISTVIEW*)l;
             if ((nm->uChanged & LVIF_STATE) && ((nm->uNewState ^ nm->uOldState) & LVIS_STATEIMAGEMASK) &&
@@ -265,7 +341,7 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return (LRESULT)s_swatch;
         }
         SetBkMode(dc, TRANSPARENT);
-        if (GetDlgCtrlID(c) == RS_CREDIT) SetTextColor(dc, g_cfg.accent);
+        if (GetDlgCtrlID(c) == RS_CREDIT || GetDlgCtrlID(c) == RS_DEVPREVIEW) SetTextColor(dc, g_cfg.accent);
         return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
     }
     case WM_CLOSE:
@@ -277,6 +353,8 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (s_font) { DeleteObject(s_font); s_font = nullptr; }
         if (s_fontTitle) { DeleteObject(s_fontTitle); s_fontTitle = nullptr; }
         if (s_fontBold) { DeleteObject(s_fontBold); s_fontBold = nullptr; }
+        if (s_fontIcon) { DeleteObject(s_fontIcon); s_fontIcon = nullptr; }
+        std::vector<AudioDevice>().swap(s_devs);
         if (s_swatch) { DeleteObject(s_swatch); s_swatch = nullptr; }
         TrimMemory();
         return 0;
@@ -306,10 +384,11 @@ void Settings_Show() {
     s_dpi = GetDpiForSystem();
     s_font = CreateFontW(-S(14), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     s_fontBold = CreateFontW(-S(14), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+    s_fontIcon = CreateFontW(-S(30), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, Radial_IconFont());
     s_fontTitle = CreateFontW(-S(24), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
 
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT rc = { 0, 0, S(600), S(694) };
+    RECT rc = { 0, 0, S(920), S(640) };
     AdjustWindowRectEx(&rc, style, FALSE, 0);
     int w = rc.right - rc.left, hgt = rc.bottom - rc.top;
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);

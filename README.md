@@ -20,8 +20,8 @@ También funciona con el ratón: pasa por encima para elegir, clic para entrar, 
 ## Opciones del menú
 
 - **Volumen general**: un arco animado con el porcentaje.
-- **Mezclador de apps**: volumen por app (Spotify, Discord, Chrome, juegos…).
-- **Salida de audio**: cambia entre cascos y altavoces.
+- **Mezclador de apps**: volumen de cada app con su propio icono. Si una app tiene varias sesiones de audio (por ejemplo, dos instancias), salen por separado.
+- **Salida de audio**: cambia entre cascos y altavoces; cada salida con el icono que elijas en Ajustes.
 - **Micrófono**: volumen del micro. También hay **Silenciar micro**.
 - **Silenciar sonido**.
 - **Play / Pausa**, **Siguiente**, **Anterior**: muestra la canción que suena.
@@ -36,6 +36,8 @@ Clic derecho en el icono de la bandeja → **Ajustes…**
 - Muescas necesarias para pasar de opción en el menú (sensibilidad del menú)
 - Invertir el sentido de giro
 - Qué hace el botón: clic, doble clic o mantener para abrir el menú
+- Qué silencia el botón: el sonido o el micrófono directamente
+- Icono de cada salida de audio (altavoces, cascos, monitor, Bluetooth…)
 - Tiempo que cuenta como «mantener»
 - Qué opciones salen en el menú y en qué orden
 - Tamaño, opacidad, color de acento y cierre automático del menú

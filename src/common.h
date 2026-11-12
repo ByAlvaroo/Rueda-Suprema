@@ -19,7 +19,7 @@
 
 #define APP_NAME    L"Rueda Suprema"
 #define APP_CREDIT  L"HECHO POR @BYALVARO__"
-#define APP_VERSION L"1.1"
+#define APP_VERSION L"1.2"
 
 #define MAIN_CLASS     L"RuedaSupremaMain"
 #define RADIAL_CLASS   L"RuedaSupremaRadial"
@@ -64,6 +64,7 @@ struct Config {
     bool invert = false;
     int  pressMode = PM_CLICK_MENU;
     int  pressKey = 0;         // 0 = la rueda manda Mute, 1 = manda Play/Pausa
+    int  muteTarget = 0;       // qué silencia el botón: 0 = sonido, 1 = micrófono
     int  holdMs = 450;
     int  size = 360;           // diámetro del radial (px a 100 %)
     int  opacity = 235;
@@ -92,9 +93,19 @@ void Config_Save();
 void Startup_Apply(bool on);
 const wchar_t* Item_Name(int id);
 
+// Iconos de los dispositivos de salida (se eligen en Ajustes)
+int            DeviceIcon_Count();
+const wchar_t* DeviceIcon_Name(int idx);
+const wchar_t* DeviceIcon_Glyph(int idx);
+int            DeviceIcon_Get(const std::wstring& deviceId);          // -1 = automático
+void           DeviceIcon_Set(const std::wstring& deviceId, int idx);
+const wchar_t* DeviceIcon_For(const std::wstring& deviceId, const std::wstring& name);
+
 // ---------- audio.cpp ----------
 struct AppSession {
+    std::wstring id;        // identificador único de la sesión de audio
     std::wstring name;
+    std::wstring exePath;   // para sacar el icono de la app
     DWORD pid = 0;
     bool  system = false;
     float vol = 1.0f;
@@ -114,7 +125,7 @@ void  Audio_SetMic(float v);
 bool  Audio_GetMicMute();
 void  Audio_SetMicMute(bool m);
 std::vector<AppSession>  Audio_ListSessions();
-void  Audio_SetSessionVolume(DWORD pid, bool system, float v);
+void  Audio_SetSessionVolume(const std::wstring& sessionId, float v);
 std::vector<AudioDevice> Audio_ListOutputs();
 bool  Audio_SetDefaultOutput(const std::wstring& id);
 std::wstring Audio_DefaultOutputName();
@@ -141,7 +152,8 @@ void Radial_Close(bool animated);
 void Radial_Rotate(int dir);
 void Radial_Click();
 void Radial_Hold();
-void Osd_Show(float vol, bool mute);
+void Osd_Show(float vol, bool mute, bool mic = false);
+const wchar_t* Radial_IconFont();
 
 // ---------- settings.cpp ----------
 void Settings_Show();
