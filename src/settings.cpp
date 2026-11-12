@@ -8,19 +8,19 @@
 #pragma comment(lib, "comdlg32.lib")
 
 enum {
-    IDC_VOLSTEP = 2001, IDC_VOLSTEP_L,
-    IDC_CLICKS, IDC_CLICKS_L,
-    IDC_HOLD, IDC_HOLD_L,
-    IDC_PRESSMODE, IDC_PRESSKEY,
-    IDC_INVERT,
-    IDC_LIST, IDC_UP, IDC_DOWN,
-    IDC_SIZE, IDC_SIZE_L,
-    IDC_OPACITY, IDC_OPACITY_L,
-    IDC_AUTOCLOSE, IDC_AUTOCLOSE_L,
-    IDC_COLOR, IDC_SWATCH,
-    IDC_CLOSEACTION,
-    IDC_OSD, IDC_SOUNDS, IDC_STARTUP,
-    IDC_TEST, IDC_CLOSE, IDC_CREDIT
+    RS_VOLSTEP = 2001, RS_VOLSTEP_L,
+    RS_CLICKS, RS_CLICKS_L,
+    RS_HOLD, RS_HOLD_L,
+    RS_PRESSMODE, RS_PRESSKEY,
+    RS_INVERT,
+    RS_LIST, RS_UP, RS_DOWN,
+    RS_SIZE, RS_SIZE_L,
+    RS_OPACITY, RS_OPACITY_L,
+    RS_AUTOCLOSE, RS_AUTOCLOSE_L,
+    RS_COLOR, RS_SWATCH,
+    RS_CLOSEACTION,
+    RS_OSD, RS_SOUNDS, RS_STARTUP,
+    RS_TEST, RS_CLOSE, RS_CREDIT
 };
 
 static HWND   s_wnd = nullptr;
@@ -53,16 +53,16 @@ static void SetLabel(int id, const wchar_t* fmt, int v) {
 }
 
 static void UpdateLabels() {
-    SetLabel(IDC_VOLSTEP_L,   L"Volumen por muesca: %d %%", g_cfg.volStep);
-    SetLabel(IDC_CLICKS_L,    L"Muescas para cambiar de opción: %d", g_cfg.menuClicks);
-    SetLabel(IDC_HOLD_L,      L"Tiempo para «mantener»: %d ms", g_cfg.holdMs);
-    SetLabel(IDC_SIZE_L,      L"Tamaño del menú: %d px", g_cfg.size);
-    SetLabel(IDC_OPACITY_L,   L"Opacidad: %d %%", g_cfg.opacity * 100 / 255);
-    SetLabel(IDC_AUTOCLOSE_L, L"Se cierra solo tras: %d s", g_cfg.autoClose);
+    SetLabel(RS_VOLSTEP_L,   L"Volumen por muesca: %d %%", g_cfg.volStep);
+    SetLabel(RS_CLICKS_L,    L"Muescas para cambiar de opción: %d", g_cfg.menuClicks);
+    SetLabel(RS_HOLD_L,      L"Tiempo para «mantener»: %d ms", g_cfg.holdMs);
+    SetLabel(RS_SIZE_L,      L"Tamaño del menú: %d px", g_cfg.size);
+    SetLabel(RS_OPACITY_L,   L"Opacidad: %d %%", g_cfg.opacity * 100 / 255);
+    SetLabel(RS_AUTOCLOSE_L, L"Se cierra solo tras: %d s", g_cfg.autoClose);
 }
 
 static void FillList(int select) {
-    HWND lv = GetDlgItem(s_wnd, IDC_LIST);
+    HWND lv = GetDlgItem(s_wnd, RS_LIST);
     s_populating = true;
     ListView_DeleteAllItems(lv);
     for (int i = 0; i < IT_COUNT; i++) {
@@ -81,7 +81,7 @@ static void FillList(int select) {
 }
 
 static void MoveItem(int delta) {
-    HWND lv = GetDlgItem(s_wnd, IDC_LIST);
+    HWND lv = GetDlgItem(s_wnd, RS_LIST);
     int i = ListView_GetNextItem(lv, -1, LVNI_SELECTED);
     int j = i + delta;
     if (i < 0 || j < 0 || j >= IT_COUNT) return;
@@ -98,68 +98,68 @@ static void Build() {
 
     // ---- Rueda
     Ctl(L"BUTTON", L"Rueda", BS_GROUPBOX, 12, 74, 576, 214, 0);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 100, 240, 20, IDC_VOLSTEP_L);
-    Track(IDC_VOLSTEP, 280, 96, 290, 1, 10, g_cfg.volStep, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 132, 240, 20, IDC_CLICKS_L);
-    Track(IDC_CLICKS, 280, 128, 290, 1, 5, g_cfg.menuClicks, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 28, 164, 240, 20, IDC_HOLD_L);
-    Track(IDC_HOLD, 280, 160, 290, 5, 20, g_cfg.holdMs / 50, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 100, 240, 20, RS_VOLSTEP_L);
+    Track(RS_VOLSTEP, 280, 96, 290, 1, 10, g_cfg.volStep, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 132, 240, 20, RS_CLICKS_L);
+    Track(RS_CLICKS, 280, 128, 290, 1, 5, g_cfg.menuClicks, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 28, 164, 240, 20, RS_HOLD_L);
+    Track(RS_HOLD, 280, 160, 290, 5, 20, g_cfg.holdMs / 50, 1);
 
     Ctl(L"STATIC", L"Botón de la rueda:", SS_LEFT, 28, 199, 170, 20, 0);
-    HWND cb = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 195, 370, 200, IDC_PRESSMODE);
+    HWND cb = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 195, 370, 200, RS_PRESSMODE);
     SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Clic: abrir/confirmar  ·  Mantener: silenciar");
     SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Doble clic: abrir menú  ·  Clic: silenciar");
     SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)L"Mantener: abrir menú  ·  Clic: silenciar");
     SendMessageW(cb, CB_SETCURSEL, g_cfg.pressMode, 0);
 
     Ctl(L"STATIC", L"Al pulsar, la rueda envía:", SS_LEFT, 28, 231, 170, 20, 0);
-    HWND ck = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 227, 370, 200, IDC_PRESSKEY);
+    HWND ck = Ctl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 227, 370, 200, RS_PRESSKEY);
     SendMessageW(ck, CB_ADDSTRING, 0, (LPARAM)L"Silenciar (Mute) - lo normal en el AK820");
     SendMessageW(ck, CB_ADDSTRING, 0, (LPARAM)L"Play / Pausa");
     SendMessageW(ck, CB_SETCURSEL, g_cfg.pressKey, 0);
 
-    HWND inv = Ctl(L"BUTTON", L"Invertir sentido de giro", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 260, 300, 22, IDC_INVERT);
+    HWND inv = Ctl(L"BUTTON", L"Invertir sentido de giro", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 260, 300, 22, RS_INVERT);
     SendMessageW(inv, BM_SETCHECK, g_cfg.invert ? BST_CHECKED : BST_UNCHECKED, 0);
 
     // ---- Menú radial
     Ctl(L"BUTTON", L"Menú radial", BS_GROUPBOX, 12, 298, 576, 268, 0);
     Ctl(L"STATIC", L"Opciones (marca las que quieres y ordénalas):", SS_LEFT, 28, 320, 340, 20, 0);
     HWND lv = Ctl(WC_LISTVIEWW, L"", LVS_REPORT | LVS_NOCOLUMNHEADER | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
-                  28, 342, 240, 186, IDC_LIST);
+                  28, 342, 240, 186, RS_LIST);
     ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     LVCOLUMNW col = {};
     col.mask = LVCF_WIDTH;
     col.cx = S(214);
     ListView_InsertColumn(lv, 0, &col);
     FillList(0);
-    Ctl(L"BUTTON", L"▲ Subir", BS_PUSHBUTTON | WS_TABSTOP, 276, 342, 90, 28, IDC_UP);
-    Ctl(L"BUTTON", L"▼ Bajar", BS_PUSHBUTTON | WS_TABSTOP, 276, 376, 90, 28, IDC_DOWN);
+    Ctl(L"BUTTON", L"▲ Subir", BS_PUSHBUTTON | WS_TABSTOP, 276, 342, 90, 28, RS_UP);
+    Ctl(L"BUTTON", L"▼ Bajar", BS_PUSHBUTTON | WS_TABSTOP, 276, 376, 90, 28, RS_DOWN);
 
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 322, 196, 20, IDC_SIZE_L);
-    Track(IDC_SIZE, 380, 342, 200, 13, 28, g_cfg.size / 20, 1);
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 376, 196, 20, IDC_OPACITY_L);
-    Track(IDC_OPACITY, 380, 396, 200, 120, 255, g_cfg.opacity, 10);
-    Ctl(L"STATIC", L"", SS_LEFT, 384, 430, 196, 20, IDC_AUTOCLOSE_L);
-    Track(IDC_AUTOCLOSE, 380, 450, 200, 2, 20, g_cfg.autoClose, 1);
-    Ctl(L"BUTTON", L"Color de acento…", BS_PUSHBUTTON | WS_TABSTOP, 384, 490, 140, 30, IDC_COLOR);
-    Ctl(L"STATIC", L"", SS_NOTIFY | WS_BORDER, 532, 490, 44, 30, IDC_SWATCH);
+    Ctl(L"STATIC", L"", SS_LEFT, 384, 322, 196, 20, RS_SIZE_L);
+    Track(RS_SIZE, 380, 342, 200, 13, 28, g_cfg.size / 20, 1);
+    Ctl(L"STATIC", L"", SS_LEFT, 384, 376, 196, 20, RS_OPACITY_L);
+    Track(RS_OPACITY, 380, 396, 200, 120, 255, g_cfg.opacity, 10);
+    Ctl(L"STATIC", L"", SS_LEFT, 384, 430, 196, 20, RS_AUTOCLOSE_L);
+    Track(RS_AUTOCLOSE, 380, 450, 200, 2, 20, g_cfg.autoClose, 1);
+    Ctl(L"BUTTON", L"Color de acento…", BS_PUSHBUTTON | WS_TABSTOP, 384, 490, 140, 30, RS_COLOR);
+    Ctl(L"STATIC", L"", SS_NOTIFY | WS_BORDER, 532, 490, 44, 30, RS_SWATCH);
 
-    HWND ca = Ctl(L"BUTTON", L"Cerrar el menú tras Play / Siguiente / Anterior", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 536, 400, 22, IDC_CLOSEACTION);
+    HWND ca = Ctl(L"BUTTON", L"Cerrar el menú tras Play / Siguiente / Anterior", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 536, 400, 22, RS_CLOSEACTION);
     SendMessageW(ca, BM_SETCHECK, g_cfg.closeAfterAction ? BST_CHECKED : BST_UNCHECKED, 0);
 
     // ---- General
     Ctl(L"BUTTON", L"General", BS_GROUPBOX, 12, 576, 576, 58, 0);
-    HWND o = Ctl(L"BUTTON", L"OSD de volumen propio", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 600, 180, 22, IDC_OSD);
+    HWND o = Ctl(L"BUTTON", L"OSD de volumen propio", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 600, 180, 22, RS_OSD);
     SendMessageW(o, BM_SETCHECK, g_cfg.osd ? BST_CHECKED : BST_UNCHECKED, 0);
-    HWND sn = Ctl(L"BUTTON", L"Sonidos al girar", BS_AUTOCHECKBOX | WS_TABSTOP, 220, 600, 150, 22, IDC_SOUNDS);
+    HWND sn = Ctl(L"BUTTON", L"Sonidos al girar", BS_AUTOCHECKBOX | WS_TABSTOP, 220, 600, 150, 22, RS_SOUNDS);
     SendMessageW(sn, BM_SETCHECK, g_cfg.sounds ? BST_CHECKED : BST_UNCHECKED, 0);
-    HWND st = Ctl(L"BUTTON", L"Iniciar con Windows", BS_AUTOCHECKBOX | WS_TABSTOP, 390, 600, 180, 22, IDC_STARTUP);
+    HWND st = Ctl(L"BUTTON", L"Iniciar con Windows", BS_AUTOCHECKBOX | WS_TABSTOP, 390, 600, 180, 22, RS_STARTUP);
     SendMessageW(st, BM_SETCHECK, g_cfg.startup ? BST_CHECKED : BST_UNCHECKED, 0);
 
     // ---- Pie
-    Ctl(L"BUTTON", L"Probar menú", BS_PUSHBUTTON | WS_TABSTOP, 12, 648, 120, 32, IDC_TEST);
-    HWND cr = Ctl(L"STATIC", APP_CREDIT, SS_CENTER | SS_CENTERIMAGE, 150, 648, 300, 32, IDC_CREDIT);
-    Ctl(L"BUTTON", L"Cerrar", BS_DEFPUSHBUTTON | WS_TABSTOP, 488, 648, 100, 32, IDC_CLOSE);
+    Ctl(L"BUTTON", L"Probar menú", BS_PUSHBUTTON | WS_TABSTOP, 12, 648, 120, 32, RS_TEST);
+    HWND cr = Ctl(L"STATIC", APP_CREDIT, SS_CENTER | SS_CENTERIMAGE, 150, 648, 300, 32, RS_CREDIT);
+    Ctl(L"BUTTON", L"Cerrar", BS_DEFPUSHBUTTON | WS_TABSTOP, 488, 648, 100, 32, RS_CLOSE);
 
     EnumChildWindows(s_wnd, [](HWND c, LPARAM) -> BOOL {
         if ((HFONT)SendMessageW(c, WM_GETFONT, 0, 0) == nullptr) SendMessageW(c, WM_SETFONT, (WPARAM)s_font, TRUE);
@@ -177,12 +177,12 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_HSCROLL: {
         int id = GetDlgCtrlID((HWND)l);
         switch (id) {
-        case IDC_VOLSTEP:   g_cfg.volStep = TrackPos(id); break;
-        case IDC_CLICKS:    g_cfg.menuClicks = TrackPos(id); break;
-        case IDC_HOLD:      g_cfg.holdMs = TrackPos(id) * 50; break;
-        case IDC_SIZE:      g_cfg.size = TrackPos(id) * 20; break;
-        case IDC_OPACITY:   g_cfg.opacity = TrackPos(id); break;
-        case IDC_AUTOCLOSE: g_cfg.autoClose = TrackPos(id); break;
+        case RS_VOLSTEP:   g_cfg.volStep = TrackPos(id); break;
+        case RS_CLICKS:    g_cfg.menuClicks = TrackPos(id); break;
+        case RS_HOLD:      g_cfg.holdMs = TrackPos(id) * 50; break;
+        case RS_SIZE:      g_cfg.size = TrackPos(id) * 20; break;
+        case RS_OPACITY:   g_cfg.opacity = TrackPos(id); break;
+        case RS_AUTOCLOSE: g_cfg.autoClose = TrackPos(id); break;
         default: return 0;
         }
         UpdateLabels();
@@ -192,22 +192,22 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_COMMAND: {
         int id = LOWORD(w);
         switch (id) {
-        case IDC_PRESSMODE:
+        case RS_PRESSMODE:
             if (HIWORD(w) == CBN_SELCHANGE) { g_cfg.pressMode = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0); Config_Save(); }
             break;
-        case IDC_PRESSKEY:
+        case RS_PRESSKEY:
             if (HIWORD(w) == CBN_SELCHANGE) { g_cfg.pressKey = (int)SendDlgItemMessageW(h, id, CB_GETCURSEL, 0, 0); Config_Save(); }
             break;
-        case IDC_INVERT:      g_cfg.invert = Checked(id); Config_Save(); break;
-        case IDC_CLOSEACTION: g_cfg.closeAfterAction = Checked(id); Config_Save(); break;
-        case IDC_OSD:         g_cfg.osd = Checked(id); Config_Save(); break;
-        case IDC_SOUNDS:      g_cfg.sounds = Checked(id); Config_Save(); if (g_cfg.sounds) Sound_Confirm(); break;
-        case IDC_STARTUP:     g_cfg.startup = Checked(id); Startup_Apply(g_cfg.startup); Config_Save(); break;
-        case IDC_UP:          MoveItem(-1); break;
-        case IDC_DOWN:        MoveItem(+1); break;
-        case IDC_COLOR:
-        case IDC_SWATCH: {
-            if (id == IDC_SWATCH && HIWORD(w) != STN_CLICKED) break;
+        case RS_INVERT:      g_cfg.invert = Checked(id); Config_Save(); break;
+        case RS_CLOSEACTION: g_cfg.closeAfterAction = Checked(id); Config_Save(); break;
+        case RS_OSD:         g_cfg.osd = Checked(id); Config_Save(); break;
+        case RS_SOUNDS:      g_cfg.sounds = Checked(id); Config_Save(); if (g_cfg.sounds) Sound_Confirm(); break;
+        case RS_STARTUP:     g_cfg.startup = Checked(id); Startup_Apply(g_cfg.startup); Config_Save(); break;
+        case RS_UP:          MoveItem(-1); break;
+        case RS_DOWN:        MoveItem(+1); break;
+        case RS_COLOR:
+        case RS_SWATCH: {
+            if (id == RS_SWATCH && HIWORD(w) != STN_CLICKED) break;
             static COLORREF custom[16] = {
                 RGB(0,170,255), RGB(124,92,255), RGB(255,64,129), RGB(255,145,0),
                 RGB(0,200,120), RGB(255,214,0), RGB(0,229,255), RGB(240,240,240) };
@@ -220,15 +220,15 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_cfg.accent = cc.rgbResult;
                 if (s_swatch) DeleteObject(s_swatch);
                 s_swatch = CreateSolidBrush(g_cfg.accent);
-                InvalidateRect(GetDlgItem(h, IDC_SWATCH), nullptr, TRUE);
+                InvalidateRect(GetDlgItem(h, RS_SWATCH), nullptr, TRUE);
                 Config_Save();
             }
             break;
         }
-        case IDC_TEST:
+        case RS_TEST:
             Radial_Open();
             break;
-        case IDC_CLOSE:
+        case RS_CLOSE:
         case IDCANCEL:
             DestroyWindow(h);
             break;
@@ -237,7 +237,7 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_NOTIFY: {
         NMHDR* hdr = (NMHDR*)l;
-        if (hdr->idFrom == IDC_LIST && hdr->code == LVN_ITEMCHANGED && !s_populating) {
+        if (hdr->idFrom == RS_LIST && hdr->code == LVN_ITEMCHANGED && !s_populating) {
             NMLISTVIEW* nm = (NMLISTVIEW*)l;
             if ((nm->uChanged & LVIF_STATE) && ((nm->uNewState ^ nm->uOldState) & LVIS_STATEIMAGEMASK) &&
                 nm->iItem >= 0 && nm->iItem < IT_COUNT) {
@@ -260,12 +260,12 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CTLCOLORSTATIC: {
         HWND c = (HWND)l;
         HDC dc = (HDC)w;
-        if (GetDlgCtrlID(c) == IDC_SWATCH) {
+        if (GetDlgCtrlID(c) == RS_SWATCH) {
             if (!s_swatch) s_swatch = CreateSolidBrush(g_cfg.accent);
             return (LRESULT)s_swatch;
         }
         SetBkMode(dc, TRANSPARENT);
-        if (GetDlgCtrlID(c) == IDC_CREDIT) SetTextColor(dc, g_cfg.accent);
+        if (GetDlgCtrlID(c) == RS_CREDIT) SetTextColor(dc, g_cfg.accent);
         return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
     }
     case WM_CLOSE:
