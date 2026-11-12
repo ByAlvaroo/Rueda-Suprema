@@ -1,0 +1,39 @@
+name: Compilar Rueda Suprema
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compilar
+        shell: cmd
+        run: build.bat
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: RuedaSuprema
+          path: RuedaSuprema.exe
+
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Rueda Suprema v1.0.${{ github.run_number }}
+          body: |
+            Descarga **RuedaSuprema.exe**, ábrelo y pulsa la rueda del AJAZZ AK820.
+            HECHO POR @BYALVARO__
+          files: RuedaSuprema.exe
