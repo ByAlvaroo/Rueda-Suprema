@@ -20,7 +20,7 @@ if not exist build mkdir build
 rc /nologo /i res /fo build\app.res res\app.rc || goto :error
 set FLAGS=/nologo /O1 /MT /EHsc /std:c++17 /W3 /DUNICODE /D_UNICODE /utf-8
 cl %FLAGS% /c src\main.cpp src\config.cpp src\audio.cpp src\radial.cpp src\settings.cpp /Fobuild\ || goto :error
-cl %FLAGS% /permissive- /c src\media.cpp /Fobuild\ || goto :error
+cl /nologo /O1 /MT /EHsc /std:c++20 /W3 /DUNICODE /D_UNICODE /utf-8 /permissive- /c src\media.cpp /Fobuild\ || goto :error
 link /nologo /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /MANIFEST:NO /OUT:RuedaSuprema.exe build\*.obj build\app.res || goto :error
 echo.
 echo  Listo: RuedaSuprema.exe
